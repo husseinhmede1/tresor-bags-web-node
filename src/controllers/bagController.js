@@ -83,7 +83,7 @@ const getAllBags = async (req, res) => {
         const sort = { [sortField]: order === 'asc' ? 1 : -1 };
 
         const [bags, total] = await Promise.all([
-            Bag.find(filter).sort(sort).skip(skip).limit(limitNum),
+            Bag.find(filter).populate('categoryId', 'title discount note').sort(sort).skip(skip).limit(limitNum),
             Bag.countDocuments(filter),
         ]);
 
@@ -106,7 +106,7 @@ const getAllBags = async (req, res) => {
 // @access  Public
 const getBagById = async (req, res) => {
     try {
-        const bag = await Bag.findById(req.params.id);
+        const bag = await Bag.findById(req.params.id).populate('categoryId', 'title discount note');
         if (!bag) {
             return res.status(404).json({ success: false, message: 'Bag not found' });
         }
