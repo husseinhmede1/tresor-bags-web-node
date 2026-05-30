@@ -69,6 +69,12 @@ const bagSchema = new mongoose.Schema(
             },
             default: [],
         },
+
+        categoryId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Category',
+            default: null,
+        },
     },
     {
         timestamps: true, // adds createdAt and updatedAt automatically

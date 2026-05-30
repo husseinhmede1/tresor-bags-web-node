@@ -15,6 +15,7 @@ const getAllBags = async (req, res) => {
             minWeight, maxWeight,
             color,
             capacity,
+            categoryId,
             sortBy = 'createdAt',
             order = 'desc',
         } = req.query;
@@ -64,6 +65,10 @@ const getAllBags = async (req, res) => {
             filter.capacity = capacities.length === 1
                 ? { $regex: capacities[0], $options: 'i' }
                 : { $in: capacities.map((c) => new RegExp(c, 'i')) };
+        }
+
+        if (categoryId) {
+            filter.categoryId = categoryId;
         }
 
         const pageNum = Math.max(1, parseInt(page));
