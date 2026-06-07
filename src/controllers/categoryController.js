@@ -3,18 +3,19 @@ const Category = require('../models/Category');
 // GET /api/categories
 const getAllCategories = async (req, res) => {
     try {
-        const { page = 1, limit = 12, search, hasDiscount } = req.query;
+        const { page = 1, limit = 12, search, hasDiscount, typeId } = req.query;
         const filter = {};
 
         if (search) filter.title = { $regex: search, $options: 'i' };
         if (hasDiscount === 'true') filter.discount = { $gt: 0 };
+        if (typeId) filter.typeId = typeId;
 
         const pageNum = Math.max(1, parseInt(page));
         const limitNum = Math.min(100, Math.max(1, parseInt(limit)));
         const skip = (pageNum - 1) * limitNum;
 
         const [categories, total] = await Promise.all([
-            Category.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limitNum),
+            Category.find(filter).populate('typeId', 'title logo').sort({ createdAt: -1 }).skip(skip).limit(limitNum),
             Category.countDocuments(filter),
         ]);
 

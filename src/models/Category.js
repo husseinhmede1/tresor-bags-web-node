@@ -20,6 +20,11 @@ const categorySchema = new mongoose.Schema(
             maxlength: [500, 'Note cannot exceed 500 characters'],
             default: '',
         },
+        typeId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Type',
+            default: null,
+        },
     },
     { timestamps: true }
 );

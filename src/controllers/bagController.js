@@ -1,4 +1,5 @@
 const Bag = require('../models/Bag');
+const Category = require('../models/Category');
 
 // @desc    Get all bags with pagination, search & filters
 // @route   GET /api/bags
@@ -69,6 +70,14 @@ const getAllBags = async (req, res) => {
 
         if (categoryId) {
             filter.categoryId = categoryId;
+        }
+
+        // Filter by typeId: find all categories with that typeId first
+        const { typeId } = req.query;
+        if (typeId) {
+            const cats = await Category.find({ typeId }).select('_id');
+            const catIds = cats.map(c => c._id);
+            filter.categoryId = { $in: catIds };
         }
 
         const pageNum = Math.max(1, parseInt(page));
