@@ -75,6 +75,12 @@ const bagSchema = new mongoose.Schema(
             ref: 'Category',
             default: null,
         },
+
+        stock: {
+            type: Number,
+            min: [0, 'Stock cannot be negative'],
+            default: 0,
+        },
     },
     {
         timestamps: true, // adds createdAt and updatedAt automatically
