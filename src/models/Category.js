@@ -25,6 +25,10 @@ const categorySchema = new mongoose.Schema(
             ref: 'Type',
             default: null,
         },
+        productCategory: {
+            type: String,
+            default: null,
+        },
     },
     { timestamps: true }
 );
