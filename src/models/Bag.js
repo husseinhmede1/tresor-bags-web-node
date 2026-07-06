@@ -82,7 +82,14 @@ const bagSchema = new mongoose.Schema(
             default: 0,
         },
 
-        productCategory: { type: String, default: null },
+        productCategory: {
+            type: String,
+            required: [true, 'Product category is required'],
+            enum: {
+                values: ['Luggage', 'Backpacks', 'Bags', 'Accessories'],
+                message: '{VALUE} is not a valid product category',
+            },
+        },
         subcategory:     { type: String, trim: true, default: '' },
         gender:          { type: String, default: '' },
     },
