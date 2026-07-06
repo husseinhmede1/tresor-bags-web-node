@@ -24,9 +24,10 @@ const orderSchema = new mongoose.Schema({
     },
     total: { type: Number, required: true },
     savings: { type: Number, default: 0 },
-    status: { type: String, enum: ['pending', 'confirmed'], default: 'pending' },
+    status: { type: String, enum: ['pending', 'confirmed', 'cancelled'], default: 'pending' },
     confirmToken: { type: String, required: true, unique: true },
     confirmedAt: { type: Date, default: null },
+    cancelledAt: { type: Date, default: null },
 }, { timestamps: true });
 
 module.exports = mongoose.model('Order', orderSchema);

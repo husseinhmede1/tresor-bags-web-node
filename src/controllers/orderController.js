@@ -30,11 +30,30 @@ const confirmOrder = async (req, res) => {
         if (order.status === 'confirmed') {
             return res.json({ success: true, data: order, message: 'Already confirmed' });
         }
-        // Deduct stock from each bag
+        if (order.status === 'cancelled') {
+            return res.status(400).json({ success: false, message: 'Order is cancelled' });
+        }
+
+        // Validate stock for all items before touching anything
+        const insufficient = [];
         for (const item of order.items) {
-            await Bag.findByIdAndUpdate(item.bagId, {
-                $inc: { stock: -item.quantity }
-            });
+            const bag = await Bag.findById(item.bagId).select('stock title');
+            const available = bag ? bag.stock : 0;
+            if (available < item.quantity) {
+                insufficient.push({
+                    title: item.title,
+                    required: item.quantity,
+                    available,
+                });
+            }
+        }
+        if (insufficient.length > 0) {
+            return res.status(400).json({ success: false, message: 'Insufficient stock', insufficient });
+        }
+
+        // All good — deduct stock
+        for (const item of order.items) {
+            await Bag.findByIdAndUpdate(item.bagId, { $inc: { stock: -item.quantity } });
         }
         order.status = 'confirmed';
         order.confirmedAt = new Date();
@@ -45,4 +64,23 @@ const confirmOrder = async (req, res) => {
     }
 };
 
-module.exports = { createOrder, getOrderByToken, confirmOrder };
+const cancelOrder = async (req, res) => {
+    try {
+        const order = await Order.findOne({ confirmToken: req.params.token });
+        if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
+        if (order.status === 'cancelled') {
+            return res.json({ success: true, data: order, message: 'Already cancelled' });
+        }
+        if (order.status === 'confirmed') {
+            return res.status(400).json({ success: false, message: 'Order already confirmed' });
+        }
+        order.status = 'cancelled';
+        order.cancelledAt = new Date();
+        await order.save();
+        res.json({ success: true, data: order });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+module.exports = { createOrder, getOrderByToken, confirmOrder, cancelOrder };

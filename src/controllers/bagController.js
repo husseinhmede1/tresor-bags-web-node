@@ -17,6 +17,9 @@ const getAllBags = async (req, res) => {
             color,
             capacity,
             categoryId,
+            productCategory,
+            subcategory,
+            gender,
             sortBy = 'createdAt',
             order = 'desc',
         } = req.query;
@@ -68,9 +71,10 @@ const getAllBags = async (req, res) => {
                 : { $in: capacities.map((c) => new RegExp(c, 'i')) };
         }
 
-        if (categoryId) {
-            filter.categoryId = categoryId;
-        }
+        if (categoryId) filter.categoryId = categoryId;
+        if (productCategory) filter.productCategory = productCategory;
+        if (subcategory) filter.subcategory = { $regex: subcategory, $options: 'i' };
+        if (gender) filter.gender = gender;
 
         // Filter by typeId: find all categories with that typeId first
         const { typeId } = req.query;

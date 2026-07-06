@@ -81,6 +81,10 @@ const bagSchema = new mongoose.Schema(
             min: [0, 'Stock cannot be negative'],
             default: 0,
         },
+
+        productCategory: { type: String, default: null },
+        subcategory:     { type: String, trim: true, default: '' },
+        gender:          { type: String, default: '' },
     },
     {
         timestamps: true, // adds createdAt and updatedAt automatically
