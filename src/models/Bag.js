@@ -70,10 +70,19 @@ const bagSchema = new mongoose.Schema(
             default: [],
         },
 
-        categoryId: {
+        // The Type this bag belongs to (e.g. "Carry-On Luggage"). Its Category
+        // (Backpacks/Luggage/Bags/Accessories) and any discount are derived from here.
+        typeId: {
             type: mongoose.Schema.Types.ObjectId,
-            ref: 'Category',
-            default: null,
+            ref: 'Type',
+            required: [true, 'Type is required'],
+        },
+
+        // The global Collection this bag belongs to (e.g. "Alpha").
+        collectionId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Collection',
+            required: [true, 'Collection is required'],
         },
 
         stock: {
@@ -82,15 +91,6 @@ const bagSchema = new mongoose.Schema(
             default: 0,
         },
 
-        productCategory: {
-            type: String,
-            required: [true, 'Product category is required'],
-            enum: {
-                values: ['Luggage', 'Backpacks', 'Bags', 'Accessories'],
-                message: '{VALUE} is not a valid product category',
-            },
-        },
-        subcategory:     { type: String, trim: true, default: '' },
         gender:          { type: String, default: '' },
     },
     {

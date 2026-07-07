@@ -1,5 +1,5 @@
 const Bag = require('../models/Bag');
-const Category = require('../models/Category');
+const Type = require('../models/Type');
 
 // @desc    Get all bags with pagination, search & filters
 // @route   GET /api/bags
@@ -16,9 +16,9 @@ const getAllBags = async (req, res) => {
             minWeight, maxWeight,
             color,
             capacity,
-            categoryId,
-            productCategory,
-            subcategory,
+            category,
+            typeId,
+            collectionId,
             gender,
             sortBy = 'createdAt',
             order = 'desc',
@@ -71,17 +71,16 @@ const getAllBags = async (req, res) => {
                 : { $in: capacities.map((c) => new RegExp(c, 'i')) };
         }
 
-        if (categoryId) filter.categoryId = categoryId;
-        if (productCategory) filter.productCategory = productCategory;
-        if (subcategory) filter.subcategory = { $regex: subcategory, $options: 'i' };
         if (gender) filter.gender = gender;
+        if (collectionId) filter.collectionId = collectionId;
 
-        // Filter by typeId: find all categories with that typeId first
-        const { typeId } = req.query;
+        // Type / Category are hierarchical: an explicit typeId wins; otherwise a
+        // top-level category resolves to all Types in that category.
         if (typeId) {
-            const cats = await Category.find({ typeId }).select('_id');
-            const catIds = cats.map(c => c._id);
-            filter.categoryId = { $in: catIds };
+            filter.typeId = typeId;
+        } else if (category) {
+            const types = await Type.find({ category }).select('_id');
+            filter.typeId = { $in: types.map((t) => t._id) };
         }
 
         const pageNum = Math.max(1, parseInt(page));
@@ -96,7 +95,10 @@ const getAllBags = async (req, res) => {
         const sort = { [sortField]: order === 'asc' ? 1 : -1 };
 
         const [bags, total] = await Promise.all([
-            Bag.find(filter).populate('categoryId', 'title discount note').sort(sort).skip(skip).limit(limitNum),
+            Bag.find(filter)
+                .populate('typeId', 'title category discount note')
+                .populate('collectionId', 'title logo')
+                .sort(sort).skip(skip).limit(limitNum),
             Bag.countDocuments(filter),
         ]);
 
@@ -119,7 +121,9 @@ const getAllBags = async (req, res) => {
 // @access  Public
 const getBagById = async (req, res) => {
     try {
-        const bag = await Bag.findById(req.params.id).populate('categoryId', 'title discount note');
+        const bag = await Bag.findById(req.params.id)
+            .populate('typeId', 'title category discount note')
+            .populate('collectionId', 'title logo');
         if (!bag) {
             return res.status(404).json({ success: false, message: 'Bag not found' });
         }

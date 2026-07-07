@@ -2,8 +2,12 @@ const Type = require('../models/Type');
 
 const getAllTypes = async (req, res) => {
     try {
-        const types = await Type.find().sort({ createdAt: -1 });
-        res.status(200).json({ success: true, data: types });
+        const { category, search } = req.query;
+        const filter = {};
+        if (category) filter.category = category;
+        if (search) filter.title = { $regex: search, $options: 'i' };
+        const types = await Type.find(filter).sort({ createdAt: -1 });
+        res.status(200).json({ success: true, count: types.length, data: types });
     } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 };
 
