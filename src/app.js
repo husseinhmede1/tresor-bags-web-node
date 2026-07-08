@@ -6,6 +6,7 @@ const bagRoutes = require('./routes/bagRoutes');
 const collectionRoutes = require('./routes/collectionRoutes');
 const typeRoutes = require('./routes/typeRoutes');
 const orderRoutes = require('./routes/orderRoutes');
+const statsRoutes = require('./routes/statsRoutes');
 dotenv.config();
 connectDB();
 
@@ -18,6 +19,7 @@ app.use('/api/bags', bagRoutes);
 app.use('/api/collections', collectionRoutes);
 app.use('/api/types', typeRoutes);
 app.use('/api/orders', orderRoutes);
+app.use('/api/stats', statsRoutes);
 
 app.get('/', (req, res) => {
   res.json({ message: 'Tresor Bags API is running 🚀' });

@@ -1,6 +1,37 @@
 const crypto = require('crypto');
 const Order = require('../models/Order');
 const Bag = require('../models/Bag');
+const { periodRange } = require('../utils/dateRange');
+
+// GET /api/orders?status=&period=&page=&limit=
+const getAllOrders = async (req, res) => {
+    try {
+        const { status, period, page = 1, limit = 20 } = req.query;
+        const filter = {};
+        if (status && ['pending', 'confirmed', 'cancelled'].includes(status)) filter.status = status;
+        if (period && period !== 'all') filter.createdAt = { $gte: periodRange(period).from };
+
+        const pageNum = Math.max(1, parseInt(page));
+        const limitNum = Math.min(100, Math.max(1, parseInt(limit)));
+        const skip = (pageNum - 1) * limitNum;
+
+        const [orders, total] = await Promise.all([
+            Order.find(filter).select('-items.mainImage').sort({ createdAt: -1 }).skip(skip).limit(limitNum),
+            Order.countDocuments(filter),
+        ]);
+
+        res.json({
+            success: true,
+            total,
+            page: pageNum,
+            totalPages: Math.ceil(total / limitNum),
+            count: orders.length,
+            data: orders,
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+};
 
 const createOrder = async (req, res) => {
     try {
@@ -83,4 +114,4 @@ const cancelOrder = async (req, res) => {
     }
 };
 
-module.exports = { createOrder, getOrderByToken, confirmOrder, cancelOrder };
+module.exports = { createOrder, getAllOrders, getOrderByToken, confirmOrder, cancelOrder };
