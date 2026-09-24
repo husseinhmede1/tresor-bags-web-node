@@ -7,10 +7,13 @@ const collectionRoutes = require('./routes/collectionRoutes');
 const typeRoutes = require('./routes/typeRoutes');
 const orderRoutes = require('./routes/orderRoutes');
 const statsRoutes = require('./routes/statsRoutes');
+const aiRoutes = require('./routes/aiRoutes');
 dotenv.config();
 connectDB();
 
 const app = express();
+// Render sits behind a proxy; needed so req.ip is the real client IP.
+app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
@@ -20,6 +23,7 @@ app.use('/api/collections', collectionRoutes);
 app.use('/api/types', typeRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/stats', statsRoutes);
+app.use('/api/ai', aiRoutes);
 
 app.get('/', (req, res) => {
   res.json({ message: 'Tresor Bags API is running 🚀' });
