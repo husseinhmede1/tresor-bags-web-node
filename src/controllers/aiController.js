@@ -4,9 +4,9 @@ const Collection = require('../models/Collection');
 
 const CLAUDE_MODEL = process.env.AI_MODEL || 'claude-sonnet-5';
 // Free-tier Gemini models get "high demand" 503s at times, so fall through a list.
-const GEMINI_MODELS = [process.env.GEMINI_MODEL, 'gemini-3.5-flash', 'gemini-3.8-flash', 'gemini-flash-latest']
+const GEMINI_MODELS = [process.env.GEMINI_MODEL, 'gemini-3.5-flash', 'gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.5-flash-lite', 'gemini-flash-lite-latest']
     .filter((m, i, a) => m && a.indexOf(m) === i);
-const MAX_IMAGES = 8;
+const MAX_IMAGES = 20;
 const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
 // AI_PROVIDER=claude|gemini picks explicitly; otherwise use whichever key is set (Gemini first, it's free).
@@ -33,7 +33,7 @@ const PRODUCT_SCHEMA = {
     required: [
         'title', 'description', 'color', 'capacity', 'weight', 'dimensions',
         'gender', 'supplierPrice', 'supplierCurrency',
-        'typeId', 'collectionId', 'notes',
+        'typeId', 'collectionId', 'notes', 'images', 'mainImage',
     ],
     properties: {
         title: { type: 'string' },
@@ -57,6 +57,20 @@ const PRODUCT_SCHEMA = {
         typeId: nullable('string'),
         collectionId: nullable('string'),
         notes: { type: 'string' },
+        // What each uploaded image is, by its 1-based number.
+        images: {
+            type: 'array',
+            items: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['number', 'kind'],
+                properties: {
+                    number: { type: 'integer' },
+                    kind: { type: 'string', enum: ['screenshot', 'product', 'other'] },
+                },
+            },
+        },
+        mainImage: nullable('integer'),
     },
 };
 
@@ -64,13 +78,18 @@ const LANGUAGES = { ar: 'Arabic', en: 'English' };
 
 const buildPrompt = ({ language, text, types, collections }) => `
 You help a Lebanese bag shop ("Trésor Bags") add products to its website.
-The owner buys bags from a Chinese supplier on WeChat. You are given one or more
-screenshots of that chat (and maybe pasted text). ALL of them describe ONE single bag:
-details may be split across several screenshots, so merge them into one product.
+The owner buys bags from a Chinese supplier on WeChat. You are given numbered images
+(and maybe pasted text), all about ONE single bag. They are a mix of:
+- "screenshot": a WeChat chat or Moments post screenshot (phone UI, text, thumbnail grids).
+  Read the product details from these; details may be split across several, so merge them.
+- "product": a real standalone photo of the bag itself (not a phone screenshot).
+- "other": anything else (unrelated photos, blank, a different product).
 Ignore unrelated chat messages (greetings, other products, payment talk).
 
 Write "title" and "description" in ${LANGUAGES[language]}, translated from the supplier's
 language (usually Chinese). Make them sound natural and appealing for shoppers:
+- Base title/description on what the supplier's text says; use product photos only to
+  confirm details like color and style. Never put a Type or Collection name in the title.
 - title: short product name, max 80 characters, no prices.
 - description: 2–4 short sentences about material, compartments, features, use. Max 1500 characters.
 - color: the color(s) in ${LANGUAGES[language]}; if several are offered, join them with ", ".
@@ -87,6 +106,11 @@ Classification (pick an id from these lists only, or null if nothing fits):
 Types: ${JSON.stringify(types)}
 Collections: ${JSON.stringify(collections)}
 gender: "Men's", "Women's", "Unisex", or "" if unclear.
+
+Images: classify every image number in "images". "mainImage" is the number of the best
+"product" photo to show first on the website (whole bag visible, front view, clean
+background), or null if there are no product photos. Never classify a phone screenshot
+as "product", even if it shows the bag.
 
 Use null for anything not present. Never invent measurements.
 "notes": one short line in ${LANGUAGES[language]} telling the owner what is missing
@@ -109,7 +133,10 @@ const askClaude = async (images, prompt) => {
         messages: [{
             role: 'user',
             content: [
-                ...images.map(i => ({ type: 'image', source: { type: 'base64', media_type: i.mediaType, data: i.data } })),
+                ...images.flatMap((i, n) => [
+                    { type: 'text', text: `Image ${n + 1}:` },
+                    { type: 'image', source: { type: 'base64', media_type: i.mediaType, data: i.data } },
+                ]),
                 { type: 'text', text: prompt },
             ],
         }],
@@ -121,7 +148,10 @@ const askGemini = async (images, prompt) => {
     const body = JSON.stringify({
         contents: [{
             parts: [
-                ...images.map(i => ({ inline_data: { mime_type: i.mediaType, data: i.data } })),
+                ...images.flatMap((i, n) => [
+                    { text: `Image ${n + 1}:` },
+                    { inline_data: { mime_type: i.mediaType, data: i.data } },
+                ]),
                 { text: prompt },
             ],
         }],
@@ -189,6 +219,12 @@ const parseProduct = async (req, res) => {
             ? await askGemini(imageBlocks, prompt)
             : await askClaude(imageBlocks, prompt);
 
+        // Keep only valid image numbers; main image must be one of the product photos.
+        const count = imageBlocks.length;
+        data.images = (data.images || []).filter(i => Number.isInteger(i.number) && i.number >= 1 && i.number <= count);
+        const products = data.images.filter(i => i.kind === 'product').map(i => i.number);
+        if (!products.includes(data.mainImage)) data.mainImage = products[0] ?? null;
+
         // Drop ids the model may have made up.
         if (!typeList.some(t => t.id === data.typeId)) data.typeId = null;
         if (!collectionList.some(c => c.id === data.collectionId)) data.collectionId = null;
@@ -196,8 +232,13 @@ const parseProduct = async (req, res) => {
         res.status(200).json({ success: true, data });
     } catch (e) {
         console.error('AI parse-product failed:', e.message);
-        const status = e.status === 429 ? 429 : 500;
-        res.status(status).json({ success: false, message: 'AI could not read the screenshots, please try again' });
+        const busy = [429, 503].includes(e.status);
+        res.status(busy ? 503 : 500).json({
+            success: false,
+            message: busy
+                ? 'The AI is busy right now, please try again in a minute'
+                : 'AI could not read the images, please try again',
+        });
     }
 };
 
