@@ -2,9 +2,21 @@ const Anthropic = require('@anthropic-ai/sdk');
 const Type = require('../models/Type');
 const Collection = require('../models/Collection');
 
-const MODEL = process.env.AI_MODEL || 'claude-sonnet-5';
+const CLAUDE_MODEL = process.env.AI_MODEL || 'claude-sonnet-5';
+// Free-tier Gemini models get "high demand" 503s at times, so fall through a list.
+const GEMINI_MODELS = [process.env.GEMINI_MODEL, 'gemini-3.5-flash', 'gemini-3.8-flash', 'gemini-flash-latest']
+    .filter((m, i, a) => m && a.indexOf(m) === i);
 const MAX_IMAGES = 8;
 const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+
+// AI_PROVIDER=claude|gemini picks explicitly; otherwise use whichever key is set (Gemini first, it's free).
+const getProvider = () => {
+    const p = (process.env.AI_PROVIDER || '').toLowerCase();
+    if (p === 'claude' || p === 'gemini') return p;
+    if (process.env.GEMINI_API_KEY) return 'gemini';
+    if (process.env.ANTHROPIC_API_KEY) return 'claude';
+    return null;
+};
 
 let client = null;
 const getClient = () => {
@@ -20,7 +32,7 @@ const PRODUCT_SCHEMA = {
     additionalProperties: false,
     required: [
         'title', 'description', 'color', 'capacity', 'weight', 'dimensions',
-        'gender', 'stock', 'supplierPrice', 'supplierCurrency',
+        'gender', 'supplierPrice', 'supplierCurrency',
         'typeId', 'collectionId', 'notes',
     ],
     properties: {
@@ -40,7 +52,6 @@ const PRODUCT_SCHEMA = {
             },
         },
         gender: { type: 'string', enum: ["Men's", "Women's", 'Unisex', ''] },
-        stock: nullable('number'),
         supplierPrice: nullable('number'),
         supplierCurrency: nullable('string'),
         typeId: nullable('string'),
@@ -71,7 +82,6 @@ Numbers:
 - capacity as a short string like "20L" if stated.
 - supplierPrice / supplierCurrency: the price the supplier quotes and its currency
   code (CNY for 元/¥/RMB, USD for $). This is a purchase cost, not the shop's price.
-- stock: only if the supplier states an available quantity.
 
 Classification (pick an id from these lists only, or null if nothing fits):
 Types: ${JSON.stringify(types)}
@@ -85,23 +95,75 @@ ${text ? `\nPasted text from the chat:\n"""\n${text}\n"""` : ''}
 `.trim();
 
 // Accepts "data:image/png;base64,...." strings.
-const toImageBlock = (dataUrl) => {
+const parseDataUrl = (dataUrl) => {
     const m = /^data:([^;]+);base64,(.+)$/.exec(dataUrl || '');
     if (!m || !IMAGE_TYPES.includes(m[1])) return null;
-    return { type: 'image', source: { type: 'base64', media_type: m[1], data: m[2] } };
+    return { mediaType: m[1], data: m[2] };
+};
+
+const askClaude = async (images, prompt) => {
+    const response = await getClient().messages.create({
+        model: CLAUDE_MODEL,
+        max_tokens: 2000,
+        output_config: { format: { type: 'json_schema', schema: PRODUCT_SCHEMA } },
+        messages: [{
+            role: 'user',
+            content: [
+                ...images.map(i => ({ type: 'image', source: { type: 'base64', media_type: i.mediaType, data: i.data } })),
+                { type: 'text', text: prompt },
+            ],
+        }],
+    });
+    return JSON.parse(response.content.find(b => b.type === 'text').text);
+};
+
+const askGemini = async (images, prompt) => {
+    const body = JSON.stringify({
+        contents: [{
+            parts: [
+                ...images.map(i => ({ inline_data: { mime_type: i.mediaType, data: i.data } })),
+                { text: prompt },
+            ],
+        }],
+        generationConfig: { responseMimeType: 'application/json', responseJsonSchema: PRODUCT_SCHEMA },
+    });
+    let lastError;
+    // Two passes over the model list, with a short pause, to ride out "high demand" spikes.
+    const attempts = [...GEMINI_MODELS, ...GEMINI_MODELS];
+    for (const [i, model] of attempts.entries()) {
+        if (i === GEMINI_MODELS.length) await new Promise(r => setTimeout(r, 2000));
+        const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY },
+            body,
+        });
+        const json = await r.json().catch(() => ({}));
+        if (r.ok) {
+            const text = json.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('');
+            if (text) return JSON.parse(text);
+            lastError = Object.assign(new Error(`Gemini ${model}: empty response`), { status: 500 });
+            continue;
+        }
+        lastError = Object.assign(new Error(`Gemini ${model}: ${json.error?.message || r.status}`), { status: r.status });
+        console.warn(lastError.message);
+        // Busy / quota / retired model: try the next one. Anything else (bad key, bad request) won't get better.
+        if (![404, 429, 500, 503].includes(r.status)) break;
+    }
+    throw lastError;
 };
 
 const parseProduct = async (req, res) => {
     try {
-        if (!process.env.ANTHROPIC_API_KEY) {
-            return res.status(503).json({ success: false, message: 'AI is not configured on the server (ANTHROPIC_API_KEY missing)' });
+        const provider = getProvider();
+        if (!provider) {
+            return res.status(503).json({ success: false, message: 'AI is not configured on the server (set GEMINI_API_KEY or ANTHROPIC_API_KEY)' });
         }
 
         const { images = [], text = '', language = 'ar' } = req.body || {};
         if (!Array.isArray(images) || images.length > MAX_IMAGES) {
             return res.status(400).json({ success: false, message: `Send at most ${MAX_IMAGES} screenshots` });
         }
-        const imageBlocks = images.map(toImageBlock);
+        const imageBlocks = images.map(parseDataUrl);
         if (imageBlocks.some(b => !b)) {
             return res.status(400).json({ success: false, message: 'Screenshots must be JPEG, PNG, WebP or GIF images' });
         }
@@ -117,29 +179,15 @@ const parseProduct = async (req, res) => {
         const typeList = types.map(t => ({ id: String(t._id), title: t.title, category: t.category }));
         const collectionList = collections.map(c => ({ id: String(c._id), title: c.title }));
 
-        const response = await getClient().messages.create({
-            model: MODEL,
-            max_tokens: 2000,
-            output_config: { format: { type: 'json_schema', schema: PRODUCT_SCHEMA } },
-            messages: [{
-                role: 'user',
-                content: [
-                    ...imageBlocks,
-                    {
-                        type: 'text',
-                        text: buildPrompt({
-                            language: LANGUAGES[language] ? language : 'ar',
-                            text: cleanText,
-                            types: typeList,
-                            collections: collectionList,
-                        }),
-                    },
-                ],
-            }],
+        const prompt = buildPrompt({
+            language: LANGUAGES[language] ? language : 'ar',
+            text: cleanText,
+            types: typeList,
+            collections: collectionList,
         });
-
-        const textBlock = response.content.find(b => b.type === 'text');
-        const data = JSON.parse(textBlock.text);
+        const data = provider === 'gemini'
+            ? await askGemini(imageBlocks, prompt)
+            : await askClaude(imageBlocks, prompt);
 
         // Drop ids the model may have made up.
         if (!typeList.some(t => t.id === data.typeId)) data.typeId = null;
