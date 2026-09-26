@@ -9,6 +9,7 @@ const orderRoutes = require('./routes/orderRoutes');
 const statsRoutes = require('./routes/statsRoutes');
 const aiRoutes = require('./routes/aiRoutes');
 const authRoutes = require('./routes/authRoutes');
+const sitemapRoutes = require('./routes/sitemapRoutes');
 const migrateImages = require('./utils/migrateImages');
 const catalogIndex = require('./utils/catalogIndex');
 dotenv.config();
@@ -29,6 +30,7 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/stats', statsRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/auth', authRoutes);
+app.use('/', sitemapRoutes);
 
 app.get('/', (req, res) => {
   res.json({ message: 'Tresor Bags API is running 🚀' });
