@@ -125,16 +125,18 @@ const parseDataUrl = (dataUrl) => {
     return { mediaType: m[1], data: m[2] };
 };
 
-const askClaude = async (images, prompt) => {
+// `images` are { mediaType, data, label? }; each is introduced by its label (default "Image N:").
+// The reply is parsed as JSON matching `schema`.
+const askClaude = async (images, prompt, schema = PRODUCT_SCHEMA) => {
     const response = await getClient().messages.create({
         model: CLAUDE_MODEL,
         max_tokens: 2000,
-        output_config: { format: { type: 'json_schema', schema: PRODUCT_SCHEMA } },
+        output_config: { format: { type: 'json_schema', schema } },
         messages: [{
             role: 'user',
             content: [
                 ...images.flatMap((i, n) => [
-                    { type: 'text', text: `Image ${n + 1}:` },
+                    { type: 'text', text: i.label || `Image ${n + 1}:` },
                     { type: 'image', source: { type: 'base64', media_type: i.mediaType, data: i.data } },
                 ]),
                 { type: 'text', text: prompt },
@@ -144,24 +146,24 @@ const askClaude = async (images, prompt) => {
     return JSON.parse(response.content.find(b => b.type === 'text').text);
 };
 
-const askGemini = async (images, prompt) => {
+const askGemini = async (images, prompt, schema = PRODUCT_SCHEMA, models = GEMINI_MODELS) => {
     const body = JSON.stringify({
         contents: [{
             parts: [
                 ...images.flatMap((i, n) => [
-                    { text: `Image ${n + 1}:` },
+                    { text: i.label || `Image ${n + 1}:` },
                     { inline_data: { mime_type: i.mediaType, data: i.data } },
                 ]),
                 { text: prompt },
             ],
         }],
-        generationConfig: { responseMimeType: 'application/json', responseJsonSchema: PRODUCT_SCHEMA },
+        generationConfig: { responseMimeType: 'application/json', responseJsonSchema: schema },
     });
     let lastError;
     // Two passes over the model list, with a short pause, to ride out "high demand" spikes.
-    const attempts = [...GEMINI_MODELS, ...GEMINI_MODELS];
+    const attempts = [...models, ...models];
     for (const [i, model] of attempts.entries()) {
-        if (i === GEMINI_MODELS.length) await new Promise(r => setTimeout(r, 2000));
+        if (i === models.length) await new Promise(r => setTimeout(r, 2000));
         const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY },
@@ -242,4 +244,12 @@ const parseProduct = async (req, res) => {
     }
 };
 
-module.exports = { parseProduct };
+// Shared with the customer-facing assistant (askController).
+// Lite models first: they have larger free quotas and answer faster, which suits short customer questions.
+const LITE_FIRST = [...GEMINI_MODELS.filter(m => m.includes('lite')), ...GEMINI_MODELS.filter(m => !m.includes('lite'))];
+const askAI = (images, prompt, schema, { lite = false } = {}) =>
+    getProvider() === 'gemini'
+        ? askGemini(images, prompt, schema, lite ? LITE_FIRST : GEMINI_MODELS)
+        : askClaude(images, prompt, schema);
+
+module.exports = { parseProduct, askAI, getProvider, parseDataUrl };
