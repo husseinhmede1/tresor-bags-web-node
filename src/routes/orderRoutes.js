@@ -1,11 +1,12 @@
 const express = require('express');
 const router = express.Router();
+const { requireAdmin } = require('../utils/adminAuth');
 const { createOrder, getAllOrders, getOrderByToken, confirmOrder, cancelOrder } = require('../controllers/orderController');
 
 router.post('/', createOrder);
-router.get('/', getAllOrders);
-router.get('/:token', getOrderByToken);
-router.patch('/:token/confirm', confirmOrder);
-router.patch('/:token/cancel', cancelOrder);
+router.get('/', requireAdmin, getAllOrders);
+router.get('/:token', requireAdmin, getOrderByToken);
+router.patch('/:token/confirm', requireAdmin, confirmOrder);
+router.patch('/:token/cancel', requireAdmin, cancelOrder);
 
 module.exports = router;

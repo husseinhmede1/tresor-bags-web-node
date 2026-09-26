@@ -35,9 +35,32 @@ const getAllOrders = async (req, res) => {
 
 const createOrder = async (req, res) => {
     try {
-        const { items, delivery, total, savings } = req.body;
+        const { items, delivery } = req.body;
+        if (!Array.isArray(items) || !items.length || items.length > 50) {
+            return res.status(400).json({ success: false, message: 'Your cart is empty' });
+        }
+        // Prices come from the database, never from the browser.
+        const round = (n) => Math.round(n * 100) / 100;
+        const bags = await Bag.find({ _id: { $in: items.map(i => i.bagId) } })
+            .select('title price mainImage typeId').populate('typeId', 'discount').lean();
+        const byId = new Map(bags.map(b => [String(b._id), b]));
+        const clean = [];
+        for (const i of items) {
+            const bag = byId.get(String(i.bagId));
+            const quantity = Math.floor(Number(i.quantity));
+            if (!bag || !(quantity >= 1 && quantity <= 99)) {
+                return res.status(400).json({ success: false, message: 'Some items in your cart are no longer available, please refresh' });
+            }
+            const discount = bag.typeId?.discount || 0;
+            clean.push({
+                bagId: bag._id, title: bag.title, mainImage: bag.mainImage, price: bag.price, discount, quantity,
+                subtotal: round(bag.price * (1 - discount / 100) * quantity),
+            });
+        }
+        const total = round(clean.reduce((sum, i) => sum + i.subtotal, 0));
+        const savings = round(clean.reduce((sum, i) => sum + i.price * i.quantity, 0) - total);
         const confirmToken = crypto.randomBytes(32).toString('hex');
-        const order = await Order.create({ items, delivery, total, savings, confirmToken });
+        const order = await Order.create({ items: clean, delivery, total, savings, confirmToken });
         res.status(201).json({ success: true, data: { orderId: order._id, confirmToken } });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });

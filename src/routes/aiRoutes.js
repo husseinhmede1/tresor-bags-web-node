@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const { requireAdmin } = require('../utils/adminAuth');
 const { parseProduct } = require('../controllers/aiController');
 
 const { askShop } = require('../controllers/askController');
@@ -22,6 +23,7 @@ const limiter = (max, message) => {
 // The admin API has no server-side auth yet, so cap AI calls per IP to stop
 // anyone who finds the endpoint from running up the API bill.
 router.post('/parse-product',
+    requireAdmin,
     limiter(Number(process.env.AI_RATE_LIMIT) || 60, 'Too many AI requests, try again later'),
     parseProduct);
 

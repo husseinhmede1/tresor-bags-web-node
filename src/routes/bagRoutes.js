@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const { requireAdmin } = require('../utils/adminAuth');
 const {
     getAllBags,
     getBagById,
@@ -10,11 +11,11 @@ const {
 
 router.route('/')
     .get(getAllBags)
-    .post(createBag);
+    .post(requireAdmin, createBag);
 
 router.route('/:id')
     .get(getBagById)
-    .put(updateBag)
-    .delete(deleteBag);
+    .put(requireAdmin, updateBag)
+    .delete(requireAdmin, deleteBag);
 
 module.exports = router;
