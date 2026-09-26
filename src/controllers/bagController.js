@@ -1,5 +1,21 @@
+const mongoose = require('mongoose');
 const Bag = require('../models/Bag');
 const Type = require('../models/Type');
+const Order = require('../models/Order');
+const { storeBagImages, deleteUrls } = require('../utils/imageStore');
+
+const bagImages = (b) => [b.mainImage, ...(b.sideImages || [])].filter(Boolean);
+
+// Delete images a bag no longer uses, except ones old orders still show.
+// Runs after the response is sent, so it must never throw.
+const dropImages = async (bagId, urls) => {
+    try {
+        const inOrders = await Order.distinct('items.mainImage', { 'items.mainImage': { $in: urls } });
+        await deleteUrls(urls.filter(u => !inOrders.includes(u)), `/bags/${bagId}`);
+    } catch (e) {
+        console.warn('Image cleanup failed:', e.message);
+    }
+};
 
 // @desc    Get all bags with pagination, search & filters
 // @route   GET /api/bags
@@ -138,7 +154,10 @@ const getBagById = async (req, res) => {
 // @access  Private (Admin)
 const createBag = async (req, res) => {
     try {
-        const bag = await Bag.create(req.body);
+        // Pick the id up front so the images land in /bags/<id> on ImageKit.
+        const _id = new mongoose.Types.ObjectId();
+        await storeBagImages(req.body, _id);
+        const bag = await Bag.create({ ...req.body, _id });
         res.status(201).json({ success: true, data: bag });
     } catch (error) {
         res.status(400).json({ success: false, message: error.message });
@@ -150,6 +169,11 @@ const createBag = async (req, res) => {
 // @access  Private (Admin)
 const updateBag = async (req, res) => {
     try {
+        const old = await Bag.findById(req.params.id).select('mainImage sideImages').lean();
+        if (!old) {
+            return res.status(404).json({ success: false, message: 'Bag not found' });
+        }
+        await storeBagImages(req.body, req.params.id);
         const bag = await Bag.findByIdAndUpdate(
             req.params.id,
             req.body,
@@ -159,6 +183,9 @@ const updateBag = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Bag not found' });
         }
         res.status(200).json({ success: true, data: bag });
+
+        const kept = new Set(bagImages(bag));
+        dropImages(bag._id, bagImages(old).filter(u => !kept.has(u)));
     } catch (error) {
         res.status(400).json({ success: false, message: error.message });
     }
@@ -174,6 +201,7 @@ const deleteBag = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Bag not found' });
         }
         res.status(200).json({ success: true, message: 'Bag deleted successfully' });
+        dropImages(bag._id, bagImages(bag));
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }

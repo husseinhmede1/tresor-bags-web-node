@@ -1,4 +1,11 @@
+const mongoose = require('mongoose');
 const Collection = require('../models/Collection');
+const { storeAll, deleteUrls } = require('../utils/imageStore');
+
+// Upload a new logo (data URL) to ImageKit, in place on `body`.
+const storeLogo = async (body, id) => {
+    if (body.logo) [body.logo] = await storeAll([body.logo], `/collections/${id}`, 'logo');
+};
 
 // GET /api/collections
 const getAllCollections = async (req, res) => {
@@ -23,7 +30,9 @@ const getCollectionById = async (req, res) => {
 // POST /api/collections
 const createCollection = async (req, res) => {
     try {
-        const collection = await Collection.create(req.body);
+        const _id = new mongoose.Types.ObjectId();
+        await storeLogo(req.body, _id);
+        const collection = await Collection.create({ ...req.body, _id });
         res.status(201).json({ success: true, data: collection });
     } catch (e) { res.status(400).json({ success: false, message: e.message }); }
 };
@@ -31,9 +40,13 @@ const createCollection = async (req, res) => {
 // PUT /api/collections/:id
 const updateCollection = async (req, res) => {
     try {
+        const old = await Collection.findById(req.params.id).select('logo').lean();
+        if (!old) return res.status(404).json({ success: false, message: 'Collection not found' });
+        await storeLogo(req.body, req.params.id);
         const collection = await Collection.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
         if (!collection) return res.status(404).json({ success: false, message: 'Collection not found' });
         res.status(200).json({ success: true, data: collection });
+        if (old.logo && old.logo !== collection.logo) deleteUrls([old.logo], `/collections/${collection._id}`);
     } catch (e) { res.status(400).json({ success: false, message: e.message }); }
 };
 
@@ -43,6 +56,7 @@ const deleteCollection = async (req, res) => {
         const collection = await Collection.findByIdAndDelete(req.params.id);
         if (!collection) return res.status(404).json({ success: false, message: 'Collection not found' });
         res.status(200).json({ success: true, message: 'Collection deleted' });
+        if (collection.logo) deleteUrls([collection.logo], `/collections/${collection._id}`);
     } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 };
 

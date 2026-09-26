@@ -8,8 +8,9 @@ const typeRoutes = require('./routes/typeRoutes');
 const orderRoutes = require('./routes/orderRoutes');
 const statsRoutes = require('./routes/statsRoutes');
 const aiRoutes = require('./routes/aiRoutes');
+const migrateImages = require('./utils/migrateImages');
 dotenv.config();
-connectDB();
+connectDB().then(migrateImages);
 
 const app = express();
 // Render sits behind a proxy; needed so req.ip is the real client IP.
