@@ -3,6 +3,7 @@ const Bag = require('../models/Bag');
 const Type = require('../models/Type');
 const Order = require('../models/Order');
 const { storeBagImages, deleteUrls } = require('../utils/imageStore');
+const catalogIndex = require('../utils/catalogIndex');
 
 const bagImages = (b) => [b.mainImage, ...(b.sideImages || [])].filter(Boolean);
 
@@ -159,6 +160,7 @@ const createBag = async (req, res) => {
         await storeBagImages(req.body, _id);
         const bag = await Bag.create({ ...req.body, _id });
         res.status(201).json({ success: true, data: bag });
+        catalogIndex.reindex(bag._id);
     } catch (error) {
         res.status(400).json({ success: false, message: error.message });
     }
@@ -183,6 +185,7 @@ const updateBag = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Bag not found' });
         }
         res.status(200).json({ success: true, data: bag });
+        catalogIndex.reindex(bag._id);
 
         const kept = new Set(bagImages(bag));
         dropImages(bag._id, bagImages(old).filter(u => !kept.has(u)));
@@ -202,6 +205,7 @@ const deleteBag = async (req, res) => {
         }
         res.status(200).json({ success: true, message: 'Bag deleted successfully' });
         dropImages(bag._id, bagImages(bag));
+        catalogIndex.forget(bag._id);
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }

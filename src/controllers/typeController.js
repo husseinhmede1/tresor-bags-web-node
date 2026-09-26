@@ -1,3 +1,4 @@
+const catalogIndex = require('../utils/catalogIndex');
 const Type = require('../models/Type');
 
 const getAllTypes = async (req, res) => {
@@ -31,6 +32,7 @@ const updateType = async (req, res) => {
         const type = await Type.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
         if (!type) return res.status(404).json({ success: false, message: 'Type not found' });
         res.status(200).json({ success: true, data: type });
+        catalogIndex.reindex().catch(() => {}); // bags show the type name
     } catch (e) { res.status(400).json({ success: false, message: e.message }); }
 };
 

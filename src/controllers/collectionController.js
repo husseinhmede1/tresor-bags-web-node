@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const Collection = require('../models/Collection');
 const { storeAll, deleteUrls } = require('../utils/imageStore');
+const catalogIndex = require('../utils/catalogIndex');
 
 // Upload a new logo (data URL) to ImageKit, in place on `body`.
 const storeLogo = async (body, id) => {
@@ -46,6 +47,7 @@ const updateCollection = async (req, res) => {
         const collection = await Collection.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
         if (!collection) return res.status(404).json({ success: false, message: 'Collection not found' });
         res.status(200).json({ success: true, data: collection });
+        catalogIndex.reindex().catch(() => {}); // bags show the collection name
         if (old.logo && old.logo !== collection.logo) deleteUrls([old.logo], `/collections/${collection._id}`);
     } catch (e) { res.status(400).json({ success: false, message: e.message }); }
 };

@@ -92,6 +92,18 @@ const bagSchema = new mongoose.Schema(
         },
 
         gender:          { type: String, default: '' },
+
+        // Search fingerprints for the shop assistant (Gemini embeddings of the main
+        // photo and of the text). Never sent to clients; rebuilt when `key` changes.
+        aiIndex: {
+            type: {
+                key: String,
+                img: [Number],
+                txt: [Number],
+                at: Date,
+            },
+            select: false,
+        },
     },
     {
         timestamps: true, // adds createdAt and updatedAt automatically

@@ -1,5 +1,6 @@
 const Bag = require('../models/Bag');
 const { askAI, getProvider, parseDataUrl } = require('./aiController');
+const catalogIndex = require('../utils/catalogIndex');
 
 // Customer-facing shop assistant: answers ONLY from the catalog + the store facts below.
 
@@ -31,7 +32,11 @@ const ASK_SCHEMA = {
 
 const MAX_TEXT = 500;
 const MAX_CARDS = 6;
-const MAX_VISUAL = 40;    // bags whose photos are compared against a customer photo
+const FULL_CATALOG_MAX = 150; // up to this many bags, every question sees the whole catalog
+const TEXT_MATCHES = 30;      // bigger catalogs: closest bags by meaning, in full detail...
+const BRIEF_MAX = 600;        // ...plus a one-line list of others (sales, prices, stock)
+const PHOTO_MATCHES = 8;      // closest bags by photo, whose photos the AI then compares
+const FALLBACK_VISUAL = 40;   // photo search before the index is built: newest bags only
 const THUMB_WIDTH = 256;
 
 const finalPrice = (b) => {
@@ -57,7 +62,14 @@ const catalogEntry = (b, ref) => ({
     description: (b.description || '').slice(0, 400),
 });
 
-const buildPrompt = ({ catalog, question, hasPhoto }) => `
+// One line per bag, for "what's on sale / cheapest / under $X" over a big catalog.
+const briefEntry = (b, ref) => ({
+    ref, title: b.title, type: b.typeId?.title, price: finalPrice(b),
+    ...(b.typeId?.discount ? { discountPercent: b.typeId.discount } : {}),
+    inStock: b.stock > 0,
+});
+
+const buildPrompt = ({ catalog, brief, question, hasPhoto }) => `
 You are the shopping assistant on the Trésor Bags website. You answer customers.
 
 STRICT RULES
@@ -81,9 +93,9 @@ ${hasPhoto ? `- The customer sent a photo ("Customer photo"). Compare it with th
 STORE INFO
 ${STORE_INFO}
 
-CATALOG (JSON)
+CATALOG (JSON${brief ? ', the bags closest to the question' : ''})
 ${JSON.stringify(catalog)}
-
+${brief ? `\nMORE BAGS (short list; same refs, use them too)\n${JSON.stringify(brief)}\n` : ''}
 CUSTOMER MESSAGE
 """
 ${question || '(no text, only a photo; reply in English)'}
@@ -125,17 +137,43 @@ const askShop = async (req, res) => {
             .sort({ createdAt: -1 })
             .lean();
         const byRef = new Map(bags.map((b, i) => [`B${i + 1}`, b]));
-        const catalog = [...byRef].map(([ref, b]) => catalogEntry(b, ref));
+        const refOf = new Map([...byRef].map(([ref, b]) => [String(b._id), ref]));
+        const small = bags.length <= FULL_CATALOG_MAX;
 
+        // Pick which bags the AI gets to see. The index can be missing (still building,
+        // or no Gemini key): then fall back to the newest bags.
         const images = [];
+        let detailRefs = null;
         if (photo) {
             images.push({ ...photo, label: 'Customer photo:' });
-            const visual = [...byRef].slice(0, MAX_VISUAL);
-            const thumbs = await Promise.all(visual.map(([, b]) => thumbnail(b.mainImage).catch(() => null)));
-            visual.forEach(([ref], i) => { if (thumbs[i]) images.push({ ...thumbs[i], label: `Catalog photo of ${ref}:` }); });
+            const ids = await catalogIndex.searchByPhoto(photo, PHOTO_MATCHES).catch(e => {
+                console.warn('Photo search index unavailable:', e.message);
+                return null;
+            });
+            const visualRefs = ids?.length
+                ? ids.map(id => refOf.get(id)).filter(Boolean)
+                : [...byRef.keys()].slice(0, FALLBACK_VISUAL);
+            const thumbs = await Promise.all(visualRefs.map(r => thumbnail(byRef.get(r).mainImage).catch(() => null)));
+            visualRefs.forEach((ref, i) => { if (thumbs[i]) images.push({ ...thumbs[i], label: `Catalog photo of ${ref}:` }); });
+            if (!small) detailRefs = visualRefs;
+        }
+        if (!small && question) {
+            const ids = await catalogIndex.searchByText(question, TEXT_MATCHES).catch(() => null);
+            const textRefs = ids ? ids.map(id => refOf.get(id)).filter(Boolean) : [...byRef.keys()].slice(0, TEXT_MATCHES);
+            detailRefs = [...new Set([...(detailRefs || []), ...textRefs])];
         }
 
-        const out = await askAI(images, buildPrompt({ catalog, question, hasPhoto: Boolean(photo) }), ASK_SCHEMA, { lite: true });
+        const detailed = detailRefs ? new Set(detailRefs) : null;
+        const catalog = [...byRef].filter(([ref]) => !detailed || detailed.has(ref)).map(([ref, b]) => catalogEntry(b, ref));
+        const brief = detailed
+            ? [...byRef]
+                .filter(([ref]) => !detailed.has(ref))
+                .sort(([, a], [, b]) => (b.typeId?.discount || 0) - (a.typeId?.discount || 0)) // sales first, then newest
+                .slice(0, BRIEF_MAX)
+                .map(([ref, b]) => briefEntry(b, ref))
+            : null;
+
+        const out = await askAI(images, buildPrompt({ catalog, brief, question, hasPhoto: Boolean(photo) }), ASK_SCHEMA, { lite: true });
 
         // Only real catalog bags make it back to the page.
         const seen = new Set();
