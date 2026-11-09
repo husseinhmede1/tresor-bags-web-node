@@ -10,11 +10,13 @@ const statsRoutes = require('./routes/statsRoutes');
 const aiRoutes = require('./routes/aiRoutes');
 const authRoutes = require('./routes/authRoutes');
 const sitemapRoutes = require('./routes/sitemapRoutes');
+const infoRoutes = require('./routes/infoRoutes');
 const migrateImages = require('./utils/migrateImages');
 const catalogIndex = require('./utils/catalogIndex');
+const storeInfo = require('./utils/storeInfo');
 dotenv.config();
 // Move old base64 images first, then (re)build the assistant's search index.
-connectDB().then(migrateImages).then(() => catalogIndex.reindex()).catch(e => console.warn('Startup jobs:', e.message));
+connectDB().then(migrateImages).then(storeInfo.seed).then(() => catalogIndex.reindex()).catch(e => console.warn('Startup jobs:', e.message));
 
 const app = express();
 // Render sits behind a proxy; needed so req.ip is the real client IP.
@@ -30,6 +32,7 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/stats', statsRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/auth', authRoutes);
+app.use('/api/info', infoRoutes);
 app.use('/', sitemapRoutes);
 
 app.get('/', (req, res) => {
