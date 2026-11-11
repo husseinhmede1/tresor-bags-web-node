@@ -66,10 +66,12 @@ const PRODUCT_SCHEMA = {
             items: {
                 type: 'object',
                 additionalProperties: false,
-                required: ['number', 'kind'],
+                required: ['number', 'kind', 'plainBackground'],
                 properties: {
                     number: { type: 'integer' },
                     kind: { type: 'string', enum: ['screenshot', 'product', 'detail', 'other'] },
+                    // A simple supplier-style shot the shop can clean up automatically.
+                    plainBackground: { type: 'boolean' },
                 },
             },
         },
@@ -90,6 +92,10 @@ The owner buys bags from a Chinese supplier on WeChat. You are given numbered im
 - "detail": a real photo of this bag that is not "product": a close-up, the inside or a
   pocket, a strap or logo detail, or the bag held in a hand or worn.
 - "other": anything else (unrelated photos, blank, a different product).
+For every image also set "plainBackground": true only for a "product" photo taken on a plain,
+simple background (a plain wall, floor or table, like a supplier's studio shot) with no other
+objects, people or scenery and no strong shadows; false for everything else (outdoor or room
+scenes, advertising photos, photos with people or props, screenshots, details).
 Ignore unrelated chat messages (greetings, other products, payment talk).
 A screenshot of WeChat Moments often shows several posts (other bags, shoes...). Use only
 the post that matches the product photos (same bag, color, model number); ignore the rest.
