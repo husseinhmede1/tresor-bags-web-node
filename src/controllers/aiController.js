@@ -214,7 +214,7 @@ const parseProduct = async (req, res) => {
             return res.status(503).json({ success: false, message: 'AI is not configured on the server (set GEMINI_API_KEY or ANTHROPIC_API_KEY)' });
         }
 
-        const { images = [], text = '', language = 'ar' } = req.body || {};
+        const { images = [], text = '', language = 'en' } = req.body || {};
         if (!Array.isArray(images) || images.length > MAX_IMAGES) {
             return res.status(400).json({ success: false, message: `Send at most ${MAX_IMAGES} screenshots` });
         }
@@ -235,7 +235,7 @@ const parseProduct = async (req, res) => {
         const collectionList = collections.map(c => ({ id: String(c._id), title: c.title }));
 
         const prompt = buildPrompt({
-            language: LANGUAGES[language] ? language : 'ar',
+            language: LANGUAGES[language] ? language : 'en',
             text: cleanText,
             types: typeList,
             collections: collectionList,
