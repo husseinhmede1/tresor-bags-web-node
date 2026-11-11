@@ -77,4 +77,14 @@ const deleteUrls = async (urls, folder) => {
     }
 };
 
-module.exports = { isConfigured, isDataUrl, isOurs, uploadDataUrl, storeAll, storeBagImages, deleteUrls };
+// Signed parameters that let the admin's browser upload one file straight to ImageKit
+// (videos are too big to pass through this server). Each token works once.
+const canUploadFromBrowser = () => isConfigured() && Boolean(process.env.IMAGEKIT_PUBLIC_KEY);
+const browserUploadAuth = (folder) => {
+    const token = crypto.randomUUID();
+    const expire = Math.floor(Date.now() / 1000) + 30 * 60; // ImageKit allows under 1 hour
+    const signature = crypto.createHmac('sha1', process.env.IMAGEKIT_PRIVATE_KEY).update(token + expire).digest('hex');
+    return { token, expire, signature, publicKey: process.env.IMAGEKIT_PUBLIC_KEY, folder };
+};
+
+module.exports = { canUploadFromBrowser, browserUploadAuth, isConfigured, isDataUrl, isOurs, uploadDataUrl, storeAll, storeBagImages, deleteUrls };

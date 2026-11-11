@@ -2,10 +2,18 @@ const mongoose = require('mongoose');
 const Bag = require('../models/Bag');
 const Type = require('../models/Type');
 const Order = require('../models/Order');
-const { storeBagImages, deleteUrls } = require('../utils/imageStore');
+const { storeBagImages, deleteUrls, isOurs, canUploadFromBrowser, browserUploadAuth } = require('../utils/imageStore');
 const catalogIndex = require('../utils/catalogIndex');
 
-const bagImages = (b) => [b.mainImage, ...(b.sideImages || [])].filter(Boolean);
+const bagImages = (b) => [b.mainImage, ...(b.sideImages || []), ...(b.videos || [])].filter(Boolean);
+
+// Videos must be files we uploaded to our own ImageKit, never a link from elsewhere.
+const isHexId = (v) => typeof v === 'string' && /^[a-f0-9]{24}$/i.test(v);
+
+const cleanVideos = (body) => {
+    if (body.videos === undefined) return;
+    body.videos = Array.isArray(body.videos) ? [...new Set(body.videos.filter(isOurs))] : [];
+};
 
 // Delete images a bag no longer uses, except ones old orders still show.
 // Runs after the response is sent, so it must never throw.
@@ -156,7 +164,9 @@ const getBagById = async (req, res) => {
 const createBag = async (req, res) => {
     try {
         // Pick the id up front so the images land in /bags/<id> on ImageKit.
-        const _id = new mongoose.Types.ObjectId();
+        // A new bag that already has videos comes with the id its upload folder was made for.
+        const _id = isHexId(req.body._id) ? new mongoose.Types.ObjectId(req.body._id) : new mongoose.Types.ObjectId();
+        cleanVideos(req.body);
         await storeBagImages(req.body, _id);
         const bag = await Bag.create({ ...req.body, _id });
         res.status(201).json({ success: true, data: bag });
@@ -171,10 +181,11 @@ const createBag = async (req, res) => {
 // @access  Private (Admin)
 const updateBag = async (req, res) => {
     try {
-        const old = await Bag.findById(req.params.id).select('mainImage sideImages').lean();
+        const old = await Bag.findById(req.params.id).select('mainImage sideImages videos').lean();
         if (!old) {
             return res.status(404).json({ success: false, message: 'Bag not found' });
         }
+        cleanVideos(req.body);
         await storeBagImages(req.body, req.params.id);
         const bag = await Bag.findByIdAndUpdate(
             req.params.id,
@@ -211,7 +222,20 @@ const deleteBag = async (req, res) => {
     }
 };
 
+// @desc    Signed parameters for uploading one video straight to ImageKit
+// @route   POST /api/bags/video-upload  { bagId? }
+// @access  Private (Admin)
+const videoUploadAuth = (req, res) => {
+    if (!canUploadFromBrowser()) {
+        return res.status(503).json({ success: false, message: 'Video upload is not set up on the server yet (IMAGEKIT_PUBLIC_KEY is missing)' });
+    }
+    // A bag that is not saved yet gets its id now, so its videos and photos share one folder.
+    const bagId = isHexId(req.body?.bagId) ? req.body.bagId.toLowerCase() : String(new mongoose.Types.ObjectId());
+    res.json({ success: true, data: { bagId, ...browserUploadAuth(`/bags/${bagId}`) } });
+};
+
 module.exports = {
+    videoUploadAuth,
     getAllBags,
     getBagById,
     createBag,

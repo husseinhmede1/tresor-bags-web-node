@@ -70,6 +70,18 @@ const bagSchema = new mongoose.Schema(
             default: [],
         },
 
+        // Product videos on ImageKit (uploaded straight from the admin's browser).
+        videos: {
+            type: [String],
+            validate: {
+                validator: function (arr) {
+                    return arr.length <= 5;
+                },
+                message: 'Videos cannot exceed 5 items',
+            },
+            default: [],
+        },
+
         // The Type this bag belongs to (e.g. "Carry-On Luggage"). Its Category
         // (Backpacks/Luggage/Bags/Accessories) and any discount are derived from here.
         typeId: {
