@@ -33,6 +33,7 @@ app.use('/api/stats', statsRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/info', infoRoutes);
+app.use('/models', require('./routes/modelRoutes'));
 app.use('/', sitemapRoutes);
 
 app.get('/', (req, res) => {
