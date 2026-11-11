@@ -11,6 +11,7 @@ const aiRoutes = require('./routes/aiRoutes');
 const authRoutes = require('./routes/authRoutes');
 const sitemapRoutes = require('./routes/sitemapRoutes');
 const infoRoutes = require('./routes/infoRoutes');
+const settingsRoutes = require('./routes/settingsRoutes');
 const migrateImages = require('./utils/migrateImages');
 const catalogIndex = require('./utils/catalogIndex');
 const storeInfo = require('./utils/storeInfo');
@@ -33,6 +34,7 @@ app.use('/api/stats', statsRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/info', infoRoutes);
+app.use('/api/settings', settingsRoutes);
 app.use('/', sitemapRoutes);
 
 app.get('/', (req, res) => {

@@ -5,7 +5,13 @@ const Order = require('../models/Order');
 const { storeBagImages, deleteUrls, isOurs, canUploadFromBrowser, browserUploadAuth } = require('../utils/imageStore');
 const catalogIndex = require('../utils/catalogIndex');
 
-const bagImages = (b) => [b.mainImage, ...(b.sideImages || []), ...(b.videos || [])].filter(Boolean);
+// Videos uploaded by the bag form ("opt_" compressed, "raw_" as recorded) have a cover image
+// with the same name next to them; it goes when its video goes.
+const videoPoster = (url) => /\/(opt|raw)_[^/]*$/.test(url.split('?')[0]) ? url.split('?')[0].replace(/\.[^./]+$/, '.jpg') : null;
+const bagImages = (b) => [
+    b.mainImage, ...(b.sideImages || []),
+    ...(b.videos || []).flatMap(v => [v, videoPoster(v)]),
+].filter(Boolean);
 
 // Videos must be files we uploaded to our own ImageKit, never a link from elsewhere.
 const isHexId = (v) => typeof v === 'string' && /^[a-f0-9]{24}$/i.test(v);
