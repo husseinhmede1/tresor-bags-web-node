@@ -2,14 +2,17 @@ const Anthropic = require('@anthropic-ai/sdk');
 const Type = require('../models/Type');
 const Collection = require('../models/Collection');
 
-const CLAUDE_MODEL = process.env.AI_MODEL || 'claude-sonnet-5';
+const CLAUDE_MODEL = process.env.AI_MODEL || 'claude-opus-5-5';
+// How hard Claude thinks before filling the form: "low" is faster, "high" more careful.
+const CLAUDE_EFFORT = ['low', 'medium', 'high'].includes(process.env.AI_EFFORT) ? process.env.AI_EFFORT : 'medium';
 // Free-tier Gemini models get "high demand" 503s at times, so fall through a list.
 const GEMINI_MODELS = [process.env.GEMINI_MODEL, 'gemini-3.5-flash', 'gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.5-flash-lite', 'gemini-flash-lite-latest']
     .filter((m, i, a) => m && a.indexOf(m) === i);
 const MAX_IMAGES = 20;
 const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
-// AI_PROVIDER=claude|gemini picks explicitly; otherwise use whichever key is set (Gemini first, it's free).
+// For the customer assistant: AI_PROVIDER=claude|gemini picks explicitly; otherwise whichever key
+// is set, Gemini first (it's free and answers many short questions).
 const getProvider = () => {
     const p = (process.env.AI_PROVIDER || '').toLowerCase();
     if (p === 'claude' || p === 'gemini') return p;
@@ -66,7 +69,7 @@ const PRODUCT_SCHEMA = {
                 required: ['number', 'kind'],
                 properties: {
                     number: { type: 'integer' },
-                    kind: { type: 'string', enum: ['screenshot', 'product', 'other'] },
+                    kind: { type: 'string', enum: ['screenshot', 'product', 'detail', 'other'] },
                 },
             },
         },
@@ -82,9 +85,14 @@ The owner buys bags from a Chinese supplier on WeChat. You are given numbered im
 (and maybe pasted text), all about ONE single bag. They are a mix of:
 - "screenshot": a WeChat chat or Moments post screenshot (phone UI, text, thumbnail grids).
   Read the product details from these; details may be split across several, so merge them.
-- "product": a real standalone photo of the bag itself (not a phone screenshot).
+- "product": a real photo of the WHOLE bag standing on its own (any angle, front, side,
+  back, top), nothing cut off, not held or worn. These may get their background replaced.
+- "detail": a real photo of this bag that is not "product": a close-up, the inside or a
+  pocket, a strap or logo detail, or the bag held in a hand or worn.
 - "other": anything else (unrelated photos, blank, a different product).
 Ignore unrelated chat messages (greetings, other products, payment talk).
+A screenshot of WeChat Moments often shows several posts (other bags, shoes...). Use only
+the post that matches the product photos (same bag, color, model number); ignore the rest.
 
 Write "title" and "description" in ${LANGUAGES[language]}, translated from the supplier's
 language (usually Chinese). Make them sound natural and appealing for shoppers:
@@ -112,7 +120,9 @@ Images: classify every image number in "images". "mainImage" is the number of th
 background), or null if there are no product photos. Never classify a phone screenshot
 as "product", even if it shows the bag.
 
-Use null for anything not present. Never invent measurements.
+Use null for anything not present. Never invent measurements, weight, capacity or prices:
+only use numbers the supplier wrote. If the supplier gives a model or style number
+(e.g. 63020618), mention it in "notes".
 "notes": one short line in ${LANGUAGES[language]} telling the owner what is missing
 or uncertain (empty string if everything is clear).
 ${text ? `\nPasted text from the chat:\n"""\n${text}\n"""` : ''}
@@ -127,11 +137,15 @@ const parseDataUrl = (dataUrl) => {
 
 // `images` are { mediaType, data, label? }; each is introduced by its label (default "Image N:").
 // The reply is parsed as JSON matching `schema`.
+// Thinking counts toward max_tokens, so leave room beyond the JSON itself.
+// If the model declines (rare), the server retries on another Claude model ("fallbacks").
 const askClaude = async (images, prompt, schema = PRODUCT_SCHEMA) => {
-    const response = await getClient().messages.create({
+    const response = await getClient().beta.messages.create({
         model: CLAUDE_MODEL,
-        max_tokens: 2000,
-        output_config: { format: { type: 'json_schema', schema } },
+        max_tokens: 16000,
+        betas: ['server-side-fallback-2026-07-01'],
+        fallbacks: 'default',
+        output_config: { effort: CLAUDE_EFFORT, format: { type: 'json_schema', schema } },
         messages: [{
             role: 'user',
             content: [
@@ -143,7 +157,12 @@ const askClaude = async (images, prompt, schema = PRODUCT_SCHEMA) => {
             ],
         }],
     });
-    return JSON.parse(response.content.find(b => b.type === 'text').text);
+    if (response.stop_reason === 'refusal' || response.stop_reason === 'max_tokens') {
+        throw Object.assign(new Error(`Claude stopped: ${response.stop_reason}`), { status: 500 });
+    }
+    const text = response.content.find(b => b.type === 'text')?.text;
+    if (!text) throw Object.assign(new Error('Claude: empty response'), { status: 500 });
+    return JSON.parse(text);
 };
 
 const askGemini = async (images, prompt, schema = PRODUCT_SCHEMA, models = GEMINI_MODELS) => {
@@ -186,8 +205,12 @@ const askGemini = async (images, prompt, schema = PRODUCT_SCHEMA, models = GEMIN
 
 const parseProduct = async (req, res) => {
     try {
-        const provider = getProvider();
-        if (!provider) {
+        // Filling the form is worth Claude's accuracy when its key is set; Gemini is the backup.
+        const providers = [
+            process.env.ANTHROPIC_API_KEY && 'claude',
+            process.env.GEMINI_API_KEY && 'gemini',
+        ].filter(Boolean);
+        if (!providers.length) {
             return res.status(503).json({ success: false, message: 'AI is not configured on the server (set GEMINI_API_KEY or ANTHROPIC_API_KEY)' });
         }
 
@@ -217,13 +240,21 @@ const parseProduct = async (req, res) => {
             types: typeList,
             collections: collectionList,
         });
-        const data = provider === 'gemini'
-            ? await askGemini(imageBlocks, prompt)
-            : await askClaude(imageBlocks, prompt);
+        let data;
+        for (const [i, provider] of providers.entries()) {
+            try {
+                data = provider === 'claude' ? await askClaude(imageBlocks, prompt) : await askGemini(imageBlocks, prompt);
+                break;
+            } catch (e) {
+                if (i === providers.length - 1) throw e;
+                console.warn(`AI parse-product: ${provider} failed (${e.message}), trying ${providers[i + 1]}`);
+            }
+        }
 
         // Keep only valid image numbers; main image must be one of the product photos.
         const count = imageBlocks.length;
         data.images = (data.images || []).filter(i => Number.isInteger(i.number) && i.number >= 1 && i.number <= count);
+        // Older answers (Gemini backup) may not use "detail"; a main photo can only be a "product".
         const products = data.images.filter(i => i.kind === 'product').map(i => i.number);
         if (!products.includes(data.mainImage)) data.mainImage = products[0] ?? null;
 
@@ -234,7 +265,7 @@ const parseProduct = async (req, res) => {
         res.status(200).json({ success: true, data });
     } catch (e) {
         console.error('AI parse-product failed:', e.message);
-        const busy = [429, 503].includes(e.status);
+        const busy = [429, 503, 529].includes(e.status);
         res.status(busy ? 503 : 500).json({
             success: false,
             message: busy
