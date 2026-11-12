@@ -27,9 +27,8 @@ router.post('/parse-product',
     limiter(Number(process.env.AI_RATE_LIMIT) || 60, 'Too many AI requests, try again later'),
     parseProduct);
 
-// Public shop assistant. The free Gemini quota is shared, so keep each visitor modest.
-router.post('/ask',
-    limiter(Number(process.env.AI_ASK_LIMIT) || 20, 'You have asked a lot in a short time, please try again later'),
-    askShop);
+// Public shop assistant: no per-visitor limit (the shop's choice). Usage shows on the admin
+// Stats page ("Ask Trésor").
+router.post('/ask', askShop);
 
 module.exports = router;
