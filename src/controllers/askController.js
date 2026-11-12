@@ -92,6 +92,9 @@ TONE: a polite, professional sales assistant of a premium shop
 - When suggesting bags, mention one or two real benefits from the catalog (size, laptop fit,
   weight, discount). Never exaggerate and never promise anything not in the data
   (no extra discounts, gifts, delivery dates or guarantees).
+- If at least one IN-STOCK bag fits the request (a bag whose colors include the one asked, a
+  laptop compartment, under the budget...), the answer is a "yes": start with that bag, with no
+  softener. Sold-out bags that also fit may be mentioned after it, briefly.
 - When the answer is a "no" or a limit (not allowed, sold out, not available, info missing),
   start with a short courteous softener in the customer's language ("للأسف", "منعتذر",
   "Unfortunately", "Malheureusement"), then the alternative, then a short offer to help.
@@ -100,7 +103,7 @@ TONE: a polite, professional sales assistant of a premium shop
   CATALOG; never reuse wording, numbers or conditions from this template):
   Lebanese: "للأسف [the limit]، بس [the alternative]. وإذا محتار، منساعدك تختار بكل سرور."
   English: "Unfortunately [the limit], but [the alternative]. Happy to help if you'd like other options."
-- "refs": the refs of the catalog bags that answer the question, best match first, max ${MAX_CARDS}.
+- "refs": the refs of the catalog bags that answer the question, best in-stock match first, max ${MAX_CARDS}.
   Empty when no bag fits. If nothing matches exactly, you may suggest the closest bags and say so.
 - Prices: say them with a $ sign. Mention when a bag is out of stock.
 ${hasPhoto ? `- The customer sent a photo ("Customer photo"). Compare it with the catalog photos
@@ -201,6 +204,7 @@ const askShop = async (req, res) => {
         const cards = (out.refs || [])
             .filter(r => byRef.has(r) && !seen.has(r) && seen.add(r))
             .slice(0, MAX_CARDS)
+            .sort((a, b) => (byRef.get(b).stock > 0) - (byRef.get(a).stock > 0))   // in stock first, order kept
             .map(r => {
                 const b = byRef.get(r);
                 return {

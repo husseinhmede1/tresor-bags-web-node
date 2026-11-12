@@ -287,7 +287,7 @@ const parseProduct = async (req, res) => {
 // Shared with the customer-facing assistant (askController).
 // Lite models first: they have larger free quotas and answer faster, which suits short customer questions.
 const LITE_FIRST = [...GEMINI_MODELS.filter(m => m.includes('lite')), ...GEMINI_MODELS.filter(m => !m.includes('lite'))];
-// Claude Haiku first when its key is set (quick, low effort; AI_ASK_PROVIDER=gemini turns it off),
+// Claude Haiku first when its key is set (medium effort: careful but quick; AI_ASK_PROVIDER=gemini turns it off),
 // Gemini as the backup. Haiku has no server-side fallback on a refusal, so Gemini covers that too.
 const askAI = async (images, prompt, schema, { lite = false } = {}) => {
     const providers = [
@@ -298,7 +298,7 @@ const askAI = async (images, prompt, schema, { lite = false } = {}) => {
     for (const [i, provider] of providers.entries()) {
         try {
             return provider === 'claude'
-                ? await askClaude(images, prompt, schema, { model: ASK_MODEL, effort: 'low', fallbacks: false, maxTokens: 8000 })
+                ? await askClaude(images, prompt, schema, { model: ASK_MODEL, effort: 'medium', fallbacks: false, maxTokens: 8000 })
                 : await askGemini(images, prompt, schema, lite ? LITE_FIRST : GEMINI_MODELS);
         } catch (e) {
             if (i === providers.length - 1) throw e;
