@@ -1,4 +1,5 @@
 const Order = require('../models/Order');
+const AskStat = require('../models/AskStat');
 const { periodRange } = require('../utils/dateRange');
 
 // GET /api/stats?period=day|week|month
@@ -42,6 +43,18 @@ const getStats = async (req, res) => {
         ]);
         const topSellers = top.map((b) => ({ title: b._id, quantity: b.quantity, revenue: b.revenue }));
 
+        // Shop assistant use in the same period, per place on the site.
+        const asks = await AskStat.aggregate([
+            { $match: { hour: { $gte: new Date(Math.floor(from.getTime() / 3600000) * 3600000) } } },
+            { $group: { _id: '$place', questions: { $sum: '$questions' }, photos: { $sum: '$photos' } } },
+        ]);
+        const assistant = { questions: 0, photos: 0, home: 0, shop: 0, bag: 0 };
+        for (const a of asks) {
+            assistant.questions += a.questions;
+            assistant.photos += a.photos;
+            assistant[a._id] = a.questions;
+        }
+
         res.json({
             success: true,
             period,
@@ -49,6 +62,7 @@ const getStats = async (req, res) => {
             kpis: { revenue, confirmedOrders, avgOrderValue, discountsGiven, pendingOrders, cancelledOrders },
             timeseries,
             topSellers,
+            assistant,
         });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });

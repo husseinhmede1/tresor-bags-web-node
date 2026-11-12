@@ -1,4 +1,6 @@
+const mongoose = require('mongoose');
 const Bag = require('../models/Bag');
+const AskStat = require('../models/AskStat');
 const { askAI, getProvider, parseDataUrl } = require('./aiController');
 const catalogIndex = require('../utils/catalogIndex');
 const storeInfo = require('../utils/storeInfo');
@@ -62,7 +64,20 @@ const briefEntry = (b, ref) => ({
     inStock: b.stock > 0,
 });
 
-const buildPrompt = ({ catalog, brief, question, hasPhoto, storeText }) => `
+const PLACES = ['home', 'shop', 'bag'];
+
+// One more question in this hour's count. Never holds up or breaks the answer.
+const countQuestion = (place, hasPhoto) => {
+    const hour = new Date();
+    hour.setMinutes(0, 0, 0);
+    AskStat.updateOne(
+        { hour, place: PLACES.includes(place) ? place : 'shop' },
+        { $inc: { questions: 1, photos: hasPhoto ? 1 : 0 } },
+        { upsert: true },
+    ).catch(e => console.warn('Could not count question:', e.message));
+};
+
+const buildPrompt = ({ catalog, brief, question, hasPhoto, storeText, viewing }) => `
 You are the shopping assistant on the Trésor Bags website. You answer customers.
 
 STRICT RULES
@@ -107,6 +122,11 @@ TONE: a polite, professional sales assistant of a premium shop
   best match first, max ${MAX_CARDS}. The same question must always give the same bags. Empty when
   no bag fits. If nothing matches exactly, suggest the closest bags (up to 3) and say so.
 - Prices: say them with a $ sign. Mention when a bag is out of stock.
+${viewing ? `- The customer is on the page of bag ${viewing} and is asking about it. "This bag", "it" and
+  questions with no bag named are about ${viewing}: answer from its catalog entry (size, laptop fit,
+  cabin size only if its dimensions show it, colour, stock). If its entry does not say, say so
+  politely; never guess. "refs": only OTHER bags, and only when the customer asks for other options
+  (other colours, similar, cheaper, bigger...); otherwise empty.` : ''}
 ${hasPhoto ? `- The customer sent a photo ("Customer photo"). Compare it with the catalog photos
   (each labeled with its ref) by type, shape, color and style, and return the closest bags.
   If the photo is not a bag or accessory, set found=false, reason="not_a_bag", and say you can only search bags.` : ''}
@@ -136,7 +156,7 @@ const thumbnail = async (url) => {
     return img;
 };
 
-// POST /api/ai/ask  { text?, image? (data URL) }
+// POST /api/ai/ask  { text?, image? (data URL), place? (home|shop), bagId? (asked on that bag's page) }
 const askShop = async (req, res) => {
     try {
         if (!getProvider()) {
@@ -150,6 +170,8 @@ const askShop = async (req, res) => {
         if (!question && !photo) {
             return res.status(400).json({ success: false, message: 'Type a question or add a photo' });
         }
+        const bagId = mongoose.isValidObjectId(req.body?.bagId) ? String(req.body.bagId) : null;
+        countQuestion(bagId ? 'bag' : req.body?.place, Boolean(photo));
 
         const bags = await Bag.find({})
             .select('title description price color capacity weight dimensions gender stock mainImage typeId collectionId')
@@ -160,6 +182,7 @@ const askShop = async (req, res) => {
         const byRef = new Map(bags.map((b, i) => [`B${i + 1}`, b]));
         const refOf = new Map([...byRef].map(([ref, b]) => [String(b._id), ref]));
         const small = bags.length <= FULL_CATALOG_MAX;
+        const viewing = bagId ? refOf.get(bagId) || null : null;   // the bag whose page they are on
 
         // Pick which bags the AI gets to see. The index can be missing (still building,
         // or no Gemini key): then fall back to the newest bags.
@@ -184,6 +207,8 @@ const askShop = async (req, res) => {
             detailRefs = [...new Set([...(detailRefs || []), ...textRefs])];
         }
 
+        if (viewing && detailRefs) detailRefs = [viewing, ...detailRefs.filter(r => r !== viewing)];
+        else if (viewing && !small) detailRefs = [viewing];
         const detailed = detailRefs ? new Set(detailRefs) : null;
         const catalog = [...byRef].filter(([ref]) => !detailed || detailed.has(ref)).map(([ref, b]) => catalogEntry(b, ref));
         const brief = detailed
@@ -195,7 +220,7 @@ const askShop = async (req, res) => {
             : null;
 
         const storeText = await storeInfo.getText();
-        const out = await askAI(images, buildPrompt({ catalog, brief, question, hasPhoto: Boolean(photo), storeText }), ASK_SCHEMA, { lite: true });
+        const out = await askAI(images, buildPrompt({ catalog, brief, question, hasPhoto: Boolean(photo), storeText, viewing }), ASK_SCHEMA, { lite: true });
         if (out.reason === 'missing_info' && question) {
             storeInfo.logUnanswered(question).catch(e => console.warn('Could not log question:', e.message));
         }
@@ -203,7 +228,7 @@ const askShop = async (req, res) => {
         // Only real catalog bags make it back to the page.
         const seen = new Set();
         const cards = (out.refs || [])
-            .filter(r => byRef.has(r) && !seen.has(r) && seen.add(r))
+            .filter(r => byRef.has(r) && r !== viewing && !seen.has(r) && seen.add(r))
             .slice(0, MAX_CARDS)
             .sort((a, b) => (byRef.get(b).stock > 0) - (byRef.get(a).stock > 0))   // in stock first, order kept
             .map(r => {
