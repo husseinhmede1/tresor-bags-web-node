@@ -103,8 +103,9 @@ TONE: a polite, professional sales assistant of a premium shop
   CATALOG; never reuse wording, numbers or conditions from this template):
   Lebanese: "للأسف [the limit]، بس [the alternative]. وإذا محتار، منساعدك تختار بكل سرور."
   English: "Unfortunately [the limit], but [the alternative]. Happy to help if you'd like other options."
-- "refs": the refs of the catalog bags that answer the question, best in-stock match first, max ${MAX_CARDS}.
-  Empty when no bag fits. If nothing matches exactly, you may suggest the closest bags and say so.
+- "refs": EVERY catalog bag that fits the request (all of them, not a sample), in-stock ones first,
+  best match first, max ${MAX_CARDS}. The same question must always give the same bags. Empty when
+  no bag fits. If nothing matches exactly, suggest the closest bags (up to 3) and say so.
 - Prices: say them with a $ sign. Mention when a bag is out of stock.
 ${hasPhoto ? `- The customer sent a photo ("Customer photo"). Compare it with the catalog photos
   (each labeled with its ref) by type, shape, color and style, and return the closest bags.
