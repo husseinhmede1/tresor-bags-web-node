@@ -213,7 +213,7 @@ const askShop = async (req, res) => {
         res.json({ success: true, data: { found: Boolean(out.found), answer: String(out.answer || '').slice(0, 600), bags: cards } });
     } catch (e) {
         console.error('AI ask failed:', e.message);
-        const busy = [429, 503].includes(e.status);
+        const busy = [429, 503, 529].includes(e.status);
         res.status(503).json({
             success: false,
             message: busy

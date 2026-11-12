@@ -5,14 +5,15 @@ const Collection = require('../models/Collection');
 const CLAUDE_MODEL = process.env.AI_MODEL || 'claude-opus-5-5';
 // How hard Claude thinks before filling the form: "low" is faster, "high" more careful.
 const CLAUDE_EFFORT = ['low', 'medium', 'high'].includes(process.env.AI_EFFORT) ? process.env.AI_EFFORT : 'medium';
+// The customers' shop assistant: many short questions, answered fast and cheaply.
+const ASK_MODEL = process.env.AI_ASK_MODEL || 'claude-haiku-5-5';
 // Free-tier Gemini models get "high demand" 503s at times, so fall through a list.
 const GEMINI_MODELS = [process.env.GEMINI_MODEL, 'gemini-3.5-flash', 'gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.5-flash-lite', 'gemini-flash-lite-latest']
     .filter((m, i, a) => m && a.indexOf(m) === i);
 const MAX_IMAGES = 20;
 const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
-// For the customer assistant: AI_PROVIDER=claude|gemini picks explicitly; otherwise whichever key
-// is set, Gemini first (it's free and answers many short questions).
+// Is any AI configured? AI_PROVIDER=claude|gemini picks explicitly; otherwise whichever key is set.
 const getProvider = () => {
     const p = (process.env.AI_PROVIDER || '').toLowerCase();
     if (p === 'claude' || p === 'gemini') return p;
@@ -144,14 +145,16 @@ const parseDataUrl = (dataUrl) => {
 // `images` are { mediaType, data, label? }; each is introduced by its label (default "Image N:").
 // The reply is parsed as JSON matching `schema`.
 // Thinking counts toward max_tokens, so leave room beyond the JSON itself.
-// If the model declines (rare), the server retries on another Claude model ("fallbacks").
-const askClaude = async (images, prompt, schema = PRODUCT_SCHEMA) => {
-    const response = await getClient().beta.messages.create({
-        model: CLAUDE_MODEL,
-        max_tokens: 16000,
-        betas: ['server-side-fallback-2026-07-01'],
-        fallbacks: 'default',
-        output_config: { effort: CLAUDE_EFFORT, format: { type: 'json_schema', schema } },
+// With `fallbacks`, if the model declines (rare) the server retries on another Claude model.
+const askClaude = async (images, prompt, schema = PRODUCT_SCHEMA,
+    { model = CLAUDE_MODEL, effort = CLAUDE_EFFORT, fallbacks = true, maxTokens = 16000 } = {}) => {
+    const create = fallbacks
+        ? (params) => getClient().beta.messages.create({ ...params, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' })
+        : (params) => getClient().messages.create(params);
+    const response = await create({
+        model,
+        max_tokens: maxTokens,
+        output_config: { effort, format: { type: 'json_schema', schema } },
         messages: [{
             role: 'user',
             content: [
@@ -284,9 +287,24 @@ const parseProduct = async (req, res) => {
 // Shared with the customer-facing assistant (askController).
 // Lite models first: they have larger free quotas and answer faster, which suits short customer questions.
 const LITE_FIRST = [...GEMINI_MODELS.filter(m => m.includes('lite')), ...GEMINI_MODELS.filter(m => !m.includes('lite'))];
-const askAI = (images, prompt, schema, { lite = false } = {}) =>
-    getProvider() === 'gemini'
-        ? askGemini(images, prompt, schema, lite ? LITE_FIRST : GEMINI_MODELS)
-        : askClaude(images, prompt, schema);
+// Claude Haiku first when its key is set (quick, low effort; AI_ASK_PROVIDER=gemini turns it off),
+// Gemini as the backup. Haiku has no server-side fallback on a refusal, so Gemini covers that too.
+const askAI = async (images, prompt, schema, { lite = false } = {}) => {
+    const providers = [
+        process.env.ANTHROPIC_API_KEY && process.env.AI_ASK_PROVIDER !== 'gemini' && 'claude',
+        process.env.GEMINI_API_KEY && 'gemini',
+    ].filter(Boolean);
+    if (!providers.length) throw Object.assign(new Error('AI is not configured'), { status: 503 });
+    for (const [i, provider] of providers.entries()) {
+        try {
+            return provider === 'claude'
+                ? await askClaude(images, prompt, schema, { model: ASK_MODEL, effort: 'low', fallbacks: false, maxTokens: 8000 })
+                : await askGemini(images, prompt, schema, lite ? LITE_FIRST : GEMINI_MODELS);
+        } catch (e) {
+            if (i === providers.length - 1) throw e;
+            console.warn(`AI ask: ${provider} failed (${e.message}), trying ${providers[i + 1]}`);
+        }
+    }
+};
 
 module.exports = { parseProduct, askAI, getProvider, parseDataUrl };
