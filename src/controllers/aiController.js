@@ -67,12 +67,15 @@ const PRODUCT_SCHEMA = {
             items: {
                 type: 'object',
                 additionalProperties: false,
-                required: ['number', 'kind', 'plainBackground'],
+                required: ['number', 'kind', 'plainBackground', 'framed'],
                 properties: {
                     number: { type: 'integer' },
                     kind: { type: 'string', enum: ['screenshot', 'product', 'detail', 'other'] },
                     // A simple supplier-style shot the shop can clean up automatically.
                     plainBackground: { type: 'boolean' },
+                    // The photo sits inside a phone screenshot of a photo viewer; the admin page
+                    // cuts it out of the screenshot before using it.
+                    framed: { type: 'boolean' },
                 },
             },
         },
@@ -93,10 +96,18 @@ The owner buys bags from a Chinese supplier on WeChat. You are given numbered im
 - "detail": a real photo of this bag that is not "product": a close-up, the inside or a
   pocket, a strap or logo detail, or the bag held in a hand or worn.
 - "other": anything else (unrelated photos, blank, a different product).
+The owner often screenshots the supplier's photos instead of saving them. A phone screenshot of
+a photo VIEWER (ONE large photo of the bag across the full width of the screen, with black bars,
+a date line, buttons or a caption above and below it) counts as that photo: classify it
+"product" or "detail" by what the photo itself shows, and set "framed": true. The website cuts
+the photo out of the screenshot. Still read any caption text written in it for the product
+details. Set "framed": false for everything else. A chat, or a post with a grid of small
+thumbnails or several photos, stays "screenshot".
 For every image also set "plainBackground": true only for a "product" photo taken on a plain,
 simple background (a plain wall, floor or table, like a supplier's studio shot) with no other
 objects, people or scenery and no strong shadows; false for everything else (outdoor or room
-scenes, advertising photos, photos with people or props, screenshots, details).
+scenes, advertising photos, photos with people or props, screenshots, details). For a framed
+photo, judge the photo inside the frame and ignore the bars and text around it.
 Ignore unrelated chat messages (greetings, other products, payment talk).
 A screenshot of WeChat Moments often shows several posts (other bags, shoes...). Use only
 the post that matches the product photos (same bag, color, model number); ignore the rest.
@@ -124,8 +135,9 @@ gender: "Men's", "Women's", "Unisex", or "" if unclear.
 
 Images: classify every image number in "images". "mainImage" is the number of the best
 "product" photo to show first on the website (whole bag visible, front view, clean
-background), or null if there are no product photos. Never classify a phone screenshot
-as "product", even if it shows the bag.
+background), or null if there are no product photos. A chat or a post with small thumbnails
+is never "product" or "detail", even if it shows the bag; only a real photo is, or a framed
+viewer screenshot as described above. Prefer a photo without text or numbers printed on it.
 
 Use null for anything not present. Never invent measurements, weight, capacity or prices:
 only use numbers the supplier wrote. If the supplier gives a model or style number
@@ -264,6 +276,8 @@ const parseProduct = async (req, res) => {
         const count = imageBlocks.length;
         data.images = (data.images || []).filter(i => Number.isInteger(i.number) && i.number >= 1 && i.number <= count);
         // Older answers (Gemini backup) may not use "detail"; a main photo can only be a "product".
+        // Only a photo can be framed (the backup model may leave the field out).
+        data.images.forEach(i => { i.framed = i.framed === true && (i.kind === 'product' || i.kind === 'detail'); });
         const products = data.images.filter(i => i.kind === 'product').map(i => i.number);
         if (!products.includes(data.mainImage)) data.mainImage = products[0] ?? null;
 
