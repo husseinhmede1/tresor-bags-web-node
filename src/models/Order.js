@@ -8,6 +8,8 @@ const orderSchema = new mongoose.Schema({
         price: { type: Number, required: true },
         discount: { type: Number, default: 0 },
         quantity: { type: Number, required: true },
+        // How many of the quantity were not in stock and come later as a pre-order.
+        preorder: { type: Number, default: 0 },
         subtotal: { type: Number, required: true },
     }],
     delivery: {

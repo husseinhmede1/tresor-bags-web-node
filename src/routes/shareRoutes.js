@@ -63,7 +63,7 @@ router.get('/:id', async (req, res) => {
 
         const discount = bag.typeId?.discount || 0;
         const price = Math.round(bag.price * (1 - discount / 100) * 100) / 100;
-        const note = bag.stock > 0 ? (discount > 0 ? ` (${discount}% off)` : '') : ' (sold out)';
+        const note = bag.stock > 0 ? (discount > 0 ? ` (${discount}% off)` : '') : ' (pre-order)';
         const text = String(bag.description || '').replace(/\s+/g, ' ').trim();
         res.send(page({
             title: `${bag.title} · ${money(price)}${note}`,
