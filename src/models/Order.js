@@ -10,6 +10,10 @@ const orderSchema = new mongoose.Schema({
         quantity: { type: Number, required: true },
         // How many of the quantity were not in stock and come later as a pre-order.
         preorder: { type: Number, default: 0 },
+        // After payment: units still waiting for stock, and units already handed over.
+        // What is ready to hand over now is quantity - waiting - delivered.
+        waiting: { type: Number, default: 0 },
+        delivered: { type: Number, default: 0 },
         subtotal: { type: Number, required: true },
     }],
     delivery: {
@@ -31,7 +35,10 @@ const orderSchema = new mongoose.Schema({
     savings: { type: Number, default: 0 },
     status: { type: String, enum: ['pending', 'confirmed', 'cancelled'], default: 'pending' },
     confirmToken: { type: String, required: true, unique: true },
+    // Where a paid order stands. Orders paid before this existed have none and count as delivered.
+    fulfilment: { type: String, enum: ['waiting', 'ready', 'delivered'] },
     confirmedAt: { type: Date, default: null },
+    deliveredAt: { type: Date, default: null },
     cancelledAt: { type: Date, default: null },
 }, { timestamps: true });
 

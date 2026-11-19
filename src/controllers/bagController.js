@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const Bag = require('../models/Bag');
 const Type = require('../models/Type');
 const Order = require('../models/Order');
+const { giveToWaiting } = require('./orderController');
 const { storeBagImages, deleteUrls, isOurs, canUploadFromBrowser, browserUploadAuth } = require('../utils/imageStore');
 const catalogIndex = require('../utils/catalogIndex');
 
@@ -201,7 +202,19 @@ const updateBag = async (req, res) => {
         if (!bag) {
             return res.status(404).json({ success: false, message: 'Bag not found' });
         }
-        res.status(200).json({ success: true, data: bag });
+        // Stock that just came in goes first to the paid orders waiting for this bag.
+        let reserved = [];
+        try {
+            const { left, given } = await giveToWaiting(bag._id, bag.stock);
+            if (given.length) {
+                await Bag.updateOne({ _id: bag._id }, { $inc: { stock: left - bag.stock } });
+                bag.stock = left;
+                reserved = given;
+            }
+        } catch (e) {
+            console.warn('Could not give stock to waiting orders:', e.message);
+        }
+        res.status(200).json({ success: true, data: bag, reserved });
         catalogIndex.reindex(bag._id);
 
         const kept = new Set(bagImages(bag));
