@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const Bag = require('../models/Bag');
 const Type = require('../models/Type');
 const Order = require('../models/Order');
+const { currentSeason } = require('./settingController');
 const { giveToWaiting } = require('./orderController');
 const { storeBagImages, deleteUrls, isOurs, canUploadFromBrowser, browserUploadAuth } = require('../utils/imageStore');
 const catalogIndex = require('../utils/catalogIndex');
@@ -126,12 +127,13 @@ const getAllBags = async (req, res) => {
         const sortField = allowedSortFields.includes(sortBy) ? sortBy : 'createdAt';
         const sort = { [sortField]: order === 'asc' ? 1 : -1 };
 
-        const [bags, total] = await Promise.all([
+        const [bags, total, season] = await Promise.all([
             Bag.find(filter)
                 .populate('typeId', 'title category discount note')
                 .populate('collectionId', 'title logo')
                 .sort(sort).skip(skip).limit(limitNum),
             Bag.countDocuments(filter),
+            currentSeason(),   // rides along with the list the shop loads anyway (kept in memory)
         ]);
 
         res.status(200).json({
@@ -141,6 +143,7 @@ const getAllBags = async (req, res) => {
             totalPages: Math.ceil(total / limitNum),
             count: bags.length,
             data: bags,
+            season,
         });
 
     } catch (error) {
